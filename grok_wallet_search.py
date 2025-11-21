@@ -729,18 +729,42 @@ async def main():
         
         all_results = {}
         
-        # Process each worksheet
-        for worksheet_name in worksheet_names:
-            if not worksheet_name:
-                continue
-                
-            results = await process_worksheet(worksheet_name)
-            all_results[worksheet_name] = results
+        # Check if we should process worksheets in parallel
+        use_parallel_worksheets = os.environ.get("USE_PARALLEL", "true").lower() == "true" and len(worksheet_names) > 1
+        
+        if use_parallel_worksheets:
+            # Process worksheets in parallel
+            logger.info(f"🚀 Processing {len(worksheet_names)} worksheets in parallel...")
+            tasks = [
+                process_worksheet(worksheet_name)
+                for worksheet_name in worksheet_names
+                if worksheet_name
+            ]
             
-            # Small delay between worksheets
-            if worksheet_name != worksheet_names[-1]:
-                logger.info("\n⏳ Waiting 5 seconds before next worksheet...")
-                await asyncio.sleep(5)
+            # Process all worksheets concurrently
+            worksheet_results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            # Map results to worksheet names
+            for i, result in enumerate(worksheet_results):
+                worksheet_name = worksheet_names[i]
+                if isinstance(result, Exception):
+                    logger.error(f"❌ Error processing {worksheet_name}: {result}")
+                    all_results[worksheet_name] = []
+                else:
+                    all_results[worksheet_name] = result
+        else:
+            # Process worksheets sequentially (original behavior)
+            for worksheet_name in worksheet_names:
+                if not worksheet_name:
+                    continue
+                    
+                results = await process_worksheet(worksheet_name)
+                all_results[worksheet_name] = results
+                
+                # Small delay between worksheets
+                if worksheet_name != worksheet_names[-1]:
+                    logger.info("\n⏳ Waiting 5 seconds before next worksheet...")
+                    await asyncio.sleep(5)
         
         # Final summary
         logger.info(f"\n{'='*60}")
