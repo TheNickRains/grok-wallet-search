@@ -94,11 +94,25 @@ class GrokWalletSearcher:
         if creds_json:
             # Parse JSON from environment variable
             try:
+                # Strip whitespace and try to extract JSON if there's extra content
+                creds_json = creds_json.strip()
+                
+                # Try to find JSON object if there's extra text
+                if not creds_json.startswith('{'):
+                    # Look for first { and last }
+                    start_idx = creds_json.find('{')
+                    end_idx = creds_json.rfind('}')
+                    if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
+                        creds_json = creds_json[start_idx:end_idx + 1]
+                        logger.info("⚠️  Extracted JSON from GOOGLE_CREDENTIALS_JSON (removed extra content)")
+                
                 creds_info = json.loads(creds_json)
                 creds = Credentials.from_service_account_info(creds_info, scopes=scope)
                 logger.info("✅ Using credentials from GOOGLE_CREDENTIALS_JSON environment variable")
             except json.JSONDecodeError as e:
-                raise ValueError(f"Invalid JSON in GOOGLE_CREDENTIALS_JSON: {e}")
+                logger.error(f"❌ JSON parse error at position {e.pos}: {e.msg}")
+                logger.error(f"   JSON content preview: {creds_json[:200]}...")
+                raise ValueError(f"Invalid JSON in GOOGLE_CREDENTIALS_JSON: {e.msg} at position {e.pos}. Please ensure the JSON is valid and properly formatted.")
         elif creds_file:
             # Use credentials file
             if not os.path.exists(creds_file):
