@@ -9,6 +9,8 @@ import re
 import asyncio
 import time
 import logging
+import json
+import tempfile
 from datetime import datetime
 from collections import deque
 from dotenv import load_dotenv
@@ -75,18 +77,37 @@ class GrokWalletSearcher:
         
     def setup_google_sheets(self):
         """Setup Google Sheets client"""
-        creds_file = os.environ.get("GOOGLE_CREDENTIALS_FILE")
         sheet_id = os.environ.get("GOOGLE_SHEET_ID")
         
-        if not creds_file or not sheet_id:
-            raise ValueError("GOOGLE_CREDENTIALS_FILE and GOOGLE_SHEET_ID required in .env file")
+        if not sheet_id:
+            raise ValueError("GOOGLE_SHEET_ID required in environment")
         
         scope = [
             'https://www.googleapis.com/auth/spreadsheets',
             'https://www.googleapis.com/auth/drive'
         ]
         
-        creds = Credentials.from_service_account_file(creds_file, scopes=scope)
+        # Check for JSON credentials in environment variable first
+        creds_json = os.environ.get("GOOGLE_CREDENTIALS_JSON")
+        creds_file = os.environ.get("GOOGLE_CREDENTIALS_FILE")
+        
+        if creds_json:
+            # Parse JSON from environment variable
+            try:
+                creds_info = json.loads(creds_json)
+                creds = Credentials.from_service_account_info(creds_info, scopes=scope)
+                logger.info("✅ Using credentials from GOOGLE_CREDENTIALS_JSON environment variable")
+            except json.JSONDecodeError as e:
+                raise ValueError(f"Invalid JSON in GOOGLE_CREDENTIALS_JSON: {e}")
+        elif creds_file:
+            # Use credentials file
+            if not os.path.exists(creds_file):
+                raise FileNotFoundError(f"Credentials file not found: {creds_file}")
+            creds = Credentials.from_service_account_file(creds_file, scopes=scope)
+            logger.info(f"✅ Using credentials from file: {creds_file}")
+        else:
+            raise ValueError("Either GOOGLE_CREDENTIALS_JSON or GOOGLE_CREDENTIALS_FILE must be set in environment")
+        
         self.sheets_client = gspread.authorize(creds)
         
         # Open spreadsheet and worksheet
