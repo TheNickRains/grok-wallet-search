@@ -39,8 +39,13 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 class GrokWalletSearcher:
-    def __init__(self, worksheet_name=None):
-        """Initialize GROK client and Google Sheets connection"""
+    def __init__(self, worksheet_name=None, shared_semaphore=None):
+        """Initialize GROK client and Google Sheets connection
+        
+        Args:
+            worksheet_name: Name of the worksheet to process
+            shared_semaphore: Optional shared semaphore for cross-worksheet concurrency control
+        """
         # Initialize x.ai client
         api_key = os.environ.get("xai_key") or os.environ.get("XAI_API_KEY")
         if not api_key:
@@ -54,7 +59,8 @@ class GrokWalletSearcher:
         
         # Parallel processing configuration (initialize before setup_google_sheets for logging)
         self.max_concurrent = int(os.environ.get("MAX_CONCURRENT_REQUESTS", "5"))  # Max concurrent requests
-        self.semaphore = asyncio.Semaphore(self.max_concurrent)
+        # Use shared semaphore if provided (for cross-worksheet concurrency control), otherwise create new one
+        self.semaphore = shared_semaphore if shared_semaphore is not None else asyncio.Semaphore(self.max_concurrent)
         
         # Initialize Google Sheets
         self.setup_google_sheets()
@@ -654,15 +660,21 @@ If multiple posts exist, analyze all of them and provide the highest confidence 
         
         return results
 
-async def process_worksheet(worksheet_name, limit=None):
-    """Process a single worksheet"""
+async def process_worksheet(worksheet_name, limit=None, shared_semaphore=None):
+    """Process a single worksheet
+    
+    Args:
+        worksheet_name: Name of the worksheet to process
+        limit: Optional limit on number of wallets to process
+        shared_semaphore: Optional shared semaphore for cross-worksheet concurrency control
+    """
     logger.info(f"\n{'='*60}")
     logger.info(f"📊 Processing Worksheet: {worksheet_name}")
     logger.info(f"{'='*60}")
     
     try:
-        # Initialize searcher for this worksheet
-        searcher = GrokWalletSearcher(worksheet_name=worksheet_name)
+        # Initialize searcher for this worksheet with shared semaphore
+        searcher = GrokWalletSearcher(worksheet_name=worksheet_name, shared_semaphore=shared_semaphore)
         
         # Get limit from environment (0 or negative = process all)
         if limit is None:
@@ -729,14 +741,21 @@ async def main():
         
         all_results = {}
         
+        # Create shared semaphore for cross-worksheet concurrency control
+        # This ensures total concurrent requests across all worksheets don't exceed MAX_CONCURRENT_REQUESTS
+        max_concurrent = int(os.environ.get("MAX_CONCURRENT_REQUESTS", "5"))
+        shared_semaphore = asyncio.Semaphore(max_concurrent)
+        logger.info(f"🔒 Shared concurrency limit: {max_concurrent} requests across all worksheets")
+        
         # Check if we should process worksheets in parallel
         use_parallel_worksheets = os.environ.get("USE_PARALLEL", "true").lower() == "true" and len(worksheet_names) > 1
         
         if use_parallel_worksheets:
-            # Process worksheets in parallel
+            # Process worksheets in parallel with shared semaphore
             logger.info(f"🚀 Processing {len(worksheet_names)} worksheets in parallel...")
+            logger.info(f"   Total concurrent requests limited to {max_concurrent} across all worksheets")
             tasks = [
-                process_worksheet(worksheet_name)
+                process_worksheet(worksheet_name, shared_semaphore=shared_semaphore)
                 for worksheet_name in worksheet_names
                 if worksheet_name
             ]
@@ -758,7 +777,7 @@ async def main():
                 if not worksheet_name:
                     continue
                     
-                results = await process_worksheet(worksheet_name)
+                results = await process_worksheet(worksheet_name, shared_semaphore=shared_semaphore)
                 all_results[worksheet_name] = results
                 
                 # Small delay between worksheets
