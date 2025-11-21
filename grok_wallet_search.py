@@ -52,6 +52,10 @@ class GrokWalletSearcher:
         # Worksheet name
         self.worksheet_name = worksheet_name or os.environ.get("WORKSHEET_NAME", "Gigabud Holders")
         
+        # Parallel processing configuration (initialize before setup_google_sheets for logging)
+        self.max_concurrent = int(os.environ.get("MAX_CONCURRENT_REQUESTS", "5"))  # Max concurrent requests
+        self.semaphore = asyncio.Semaphore(self.max_concurrent)
+        
         # Initialize Google Sheets
         self.setup_google_sheets()
         
@@ -70,10 +74,6 @@ class GrokWalletSearcher:
         self.rate_limit_window = int(os.environ.get("RATE_LIMIT_WINDOW", "60"))  # 60 second window
         self.max_requests_per_window = int(os.environ.get("MAX_REQUESTS_PER_WINDOW", "50"))  # Adjust based on tier
         self.consecutive_rate_limits = 0  # Track consecutive rate limit errors
-        
-        # Parallel processing configuration
-        self.max_concurrent = int(os.environ.get("MAX_CONCURRENT_REQUESTS", "5"))  # Max concurrent requests
-        self.semaphore = asyncio.Semaphore(self.max_concurrent)
         
     def setup_google_sheets(self):
         """Setup Google Sheets client"""
