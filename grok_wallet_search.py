@@ -492,8 +492,45 @@ If multiple posts exist, analyze all of them and provide the highest confidence 
                 'error': ownership_result.get('error', 'Could not determine ownership')
             }
     
+    def find_first_unprocessed_row(self):
+        """Find the first row where Script Run column (column 8) is not 'true'"""
+        try:
+            all_data = self.worksheet.get_all_values()
+            if len(all_data) < 2:
+                logger.info("📋 No data rows found, starting from row 2")
+                return 2
+            
+            # Check from row 2 onwards (row 1 is header)
+            for i in range(1, len(all_data)):
+                row_data = all_data[i]
+                # Check column 8 (index 7, 0-based)
+                if len(row_data) > 7:
+                    script_run_value = row_data[7].strip().lower()
+                    # If Script Run is not "true", this is the first unprocessed row
+                    if script_run_value != "true":
+                        row_number = i + 1  # Convert to 1-based row number
+                        logger.info(f"📋 Found first unprocessed row: {row_number} (Script Run = '{row_data[7]}')")
+                        return row_number
+            
+            # All rows are processed
+            logger.info("📋 All rows appear to be processed")
+            return len(all_data) + 1  # Start after last row
+        except Exception as e:
+            logger.warning(f"⚠️  Error finding first unprocessed row: {e}. Starting from row 2.")
+            return 2
+    
     def load_checkpoint(self):
         """Load checkpoint to resume from previous run"""
+        # Check for explicit start row from environment variable
+        start_from_env = os.environ.get("START_FROM_ROW")
+        if start_from_env:
+            try:
+                start_row = int(start_from_env)
+                logger.info(f"📋 Using START_FROM_ROW environment variable: row {start_row}")
+                return start_row
+            except ValueError:
+                logger.warning(f"⚠️  Invalid START_FROM_ROW value: {start_from_env}. Ignoring.")
+        
         try:
             # Ensure checkpoint directory exists
             checkpoint_dir = os.path.dirname(self.checkpoint_file)
@@ -502,14 +539,15 @@ If multiple posts exist, analyze all of them and provide the highest confidence 
             
             with open(self.checkpoint_file, 'r') as f:
                 checkpoint = int(f.read().strip())
-                logger.info(f"📋 Resuming from checkpoint: row {checkpoint}")
+                logger.info(f"📋 Resuming from checkpoint file: row {checkpoint}")
                 return checkpoint
         except FileNotFoundError:
-            logger.info("📋 No checkpoint found, starting from beginning")
-            return 1  # Start from row 2 (row 1 is header)
+            # No checkpoint file, find first unprocessed row by checking column 8
+            logger.info("📋 No checkpoint file found, checking for first unprocessed row...")
+            return self.find_first_unprocessed_row()
         except Exception as e:
-            logger.warning(f"⚠️  Error loading checkpoint: {e}. Starting from beginning.")
-            return 1
+            logger.warning(f"⚠️  Error loading checkpoint: {e}. Finding first unprocessed row...")
+            return self.find_first_unprocessed_row()
     
     def save_checkpoint(self, row_index):
         """Save checkpoint"""
